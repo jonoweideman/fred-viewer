@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+    <form action="/" method="post">
+        {% csrf_token %}
+        <label for="series">FRED Time Series: </label>
+        <input id="series" type="text" name="series" value="{{ series }}">
+        <input type="submit" value="Fetch">
+    </form>
+    <div>
+        {% if graph %}
+        <button>Hello</button>
+        <img src='data:image/png;base64,{{ graph }}'>
+        {% else %}
+        <button>Hi</button>
+        <img src='data:image/png;base64,{{ context.graph }}'>
+        {% endif %}
+    </div>
+{% endblock content %}
