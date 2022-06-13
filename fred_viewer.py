@@ -1,15 +1,12 @@
-from PyQt5 import QtWidgets, QtCore
-from PyQt5.QtWidgets import QApplication, QMainWindow, QLineEdit, QMessageBox, QPushButton, QTableWidget
-from PyQt5.QtCore import pyqtSlot
 import sys
+from PyQt5.QtWidgets import QMainWindow, QApplication, QPushButton, QWidget, QTabWidget,QVBoxLayout, QLineEdit, QTableWidget, QMessageBox, QTableWidgetItem
+from PyQt5.QtCore import pyqtSlot
 import nasdaqdatalink
 import matplotlib
-import random
 matplotlib.use('Qt5Agg')
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-
 
 class MplCanvas(FigureCanvasQTAgg):
 
@@ -18,61 +15,82 @@ class MplCanvas(FigureCanvasQTAgg):
         self.axes = fig.add_subplot(111)
         super(MplCanvas, self).__init__(fig)
 
+class App(QMainWindow):
 
-class MainWindow(QMainWindow):
     def __init__(self):
-        super(MainWindow, self).__init__()
-        self.setGeometry(0, 0, 1400, 1000)
-        self.setWindowTitle("FRED Viewer")
-        self.initUI()
+        super().__init__()
+        self.title = 'FRED Viewer'
+        self.left = 0
+        self.top = 0
+        self.width = 1200
+        self.height = 1000
+        self.setWindowTitle(self.title)
+        self.setGeometry(self.left, self.top, self.width, self.height)
+        
+        self.table_widget = MyTableWidget(self)
+        self.setCentralWidget(self.table_widget)
+        
+        self.show()
+    
+class MyTableWidget(QWidget):
+    
+    def __init__(self, parent):
+        super(QWidget, self).__init__(parent)
+        self.layout = QVBoxLayout(self)
+        
+        self.tabs = QTabWidget()
+        self.tab1 = QWidget()
+        self.tab2 = QWidget()
+        self.tabs.resize(300,200)
+        
+        self.tabs.addTab(self.tab1,"Graph")
+        self.tabs.addTab(self.tab2,"Table")
+        
+        self.tab1.layout = QVBoxLayout(self)
+        self.tab2.layout = QVBoxLayout(self)
 
-    def initUI(self):
-
-        # Create textbox
         self.textbox = QLineEdit(self)
         self.textbox.move(10, 10)
         self.textbox.resize(280,40)
 
-        # Create a button in the window
         self.button = QPushButton('Fetch', self)
         self.button.move(300,10)
-        
-        # # connect button to function on_click
+        self.button.resize(280,40)
+
         self.button.clicked.connect(self.on_click)
 
-        #Create intitial table
-        self.table = QTableWidget(2, 12, self)
+        self.table = QTableWidget(2, 4, self)
         self.table.resize(1000, 100)
 
-        # Create the maptlotlib FigureCanvas object,
-        # which defines a single set of axes as self.axes.
         self.canvas = MplCanvas(self, width=1, height=1, dpi=100)
-        # self.canvas.axes.plot([0,1,2,3,4], [10,1,20,3,40])
-        # Create toolbar, passing canvas as first parament, parent (self, the MainWindow) as second.
         toolbar = NavigationToolbar(self.canvas, self)
 
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(toolbar)
-        layout.addWidget(self.canvas)
+        self.tab1.layout.addWidget(toolbar)
+        self.tab1.layout.addWidget(self.canvas)
+        self.tab1.layout.addWidget(self.textbox)
+        self.tab1.layout.addWidget(self.button)
+        self.tab1.setLayout(self.tab1.layout)
 
-        layout.addWidget(self.textbox)
-        layout.addWidget(self.button)
+        self.tab2.layout.addWidget(self.table)
+        self.tab2.setLayout(self.tab2.layout)
 
-        layout.addWidget(self.table)
+        self.layout.addWidget(self.tabs)
+        self.setLayout(self.layout)
+        
+    @pyqtSlot()
+    def on_click(self):
+        series_name = self.textbox.text()
 
-        widget = QtWidgets.QWidget()
-        widget.setLayout(layout)
-        self.setCentralWidget(widget)
+        try:
+            df = self.fetch_series(series_name)
+            df = df.reset_index()
+        except Exception as e:
+            return
 
-        self.show()
+        self.redraw_graph(df, series_name)
+        self.repop_table(df)
 
-    # def update_plot(self):
-    #     # Drop off the first y element, append a new one.
-    #     self.ydata = self.ydata[1:] + [random.randint(0, 10)]
-    #     self.canvas.axes.cla()  # Clear the canvas.
-    #     self.canvas.axes.plot(self.xdata, self.ydata, 'r')
-    #     # Trigger the canvas to update and redraw.
-    #     self.canvas.draw()
+        self.textbox.setText("")
     
     def fetch_series(self, series_name):
         try:
@@ -84,17 +102,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, 'Message', "Unknown error. Have you set the NASDAQ_DATA_LINK_API_KEY env variable?", QMessageBox.Ok, QMessageBox.Ok)
             raise(e)
-    
-    @pyqtSlot()
-    def on_click(self):
-        series_name = self.textbox.text()
 
-        try:
-            df = self.fetch_series(series_name)
-        except Exception as e:
-            return
-
-        df = df.reset_index()
+    def redraw_graph(self, df, series_name):
         xdata = df["Date"]
 
         df['rolling_mean'] = df['Value'].rolling(5).mean()
@@ -105,26 +114,33 @@ class MainWindow(QMainWindow):
         self.canvas.axes.plot(xdata, df["rolling_mean"], 'g', label="1-Year Rolling Mean")
         self.canvas.axes.plot(xdata, df["rolling_median"], 'b', label="1-Year Rolling Median")
 
-        print(df.head(20))
         self.canvas.axes.legend(loc="upper left")
 
         self.canvas.axes.set_ylabel("Value")
         self.canvas.axes.set_xlabel("Date")
         self.canvas.axes.set_title(f"FRED/{series_name}")
 
-
-
         self.canvas.draw()
 
-        self.textbox.setText("")
+    def repop_table(self, df):
 
+        mean_1 = df[df['Date'].dt.month == 1]["Value"].mean()
+        mean_4 = df[df['Date'].dt.month == 4]["Value"].mean()
+        mean_7 = df[df['Date'].dt.month == 7]["Value"].mean()
+        mean_10 = df[df['Date'].dt.month == 10]["Value"].mean()
+
+        self.table.setItem(0,0, QTableWidgetItem("Jan"))
+        self.table.setItem(0,1, QTableWidgetItem("April"))
+        self.table.setItem(0,2, QTableWidgetItem("July"))
+        self.table.setItem(0,3, QTableWidgetItem("October"))
         
+        self.table.setItem(1,0, QTableWidgetItem(str(round(mean_1,2))))
+        self.table.setItem(1,1, QTableWidgetItem(str(round(mean_4,2))))
+        self.table.setItem(1,2, QTableWidgetItem(str(round(mean_7,2))))
+        self.table.setItem(1,3, QTableWidgetItem(str(round(mean_10,2))))
 
 
-def window():
+if __name__ == '__main__':
     app = QApplication(sys.argv)
-    win = MainWindow()
-    win.show()
+    ex = App()
     sys.exit(app.exec_())
-
-window()
